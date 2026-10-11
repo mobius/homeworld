@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Homeworld 网页模拟 · 技术讲解版</title>
+<!-- Pages 等无 COOP/COEP 头的静态托管:由 SW 补头,使 wasm 游戏(需 SharedArrayBuffer)可用;本地 serve.py 已带头时自动跳过 -->
+<script src="coi-serviceworker.min.js"></script>
 <style>
   :root {
     --bg: #05070d;
