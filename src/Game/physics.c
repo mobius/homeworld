@@ -34,12 +34,20 @@
 
 /*-----------------------------------------------------------------------------
     Name        : physApplyForceToObj
-    Description : applies a force in direction forcedir of magnitude force to
-                  the object.  The force is translated into the mission sphere
-                  coordinate system.
-    Inputs      : obj,force,forcedir
-    Outputs     :
-    Return      :
+    Description : 对空间对象施加指定方向和大小的作用力
+                  力会被转换到任务球坐标系中
+
+    力学原理：F = ma，通过累加作用力来改变物体的运动状态
+    力会在物理更新时转换为加速度：a = F/m
+
+    Inputs      : obj       - 要施加力的空间对象
+                  force     - 力的大小（标量）
+                  transdir  - 力的方向（相对对象的本地坐标系）
+                             TRANS_UP/DOWN:    Y轴（上下）
+                             TRANS_LEFT/RIGHT: X轴（左右）
+                             TRANS_FORWARD/BACK: Z轴（前后）
+    Outputs     : 修改对象的 posinfo.force 向量（累加作用力）
+    Return      : void
 ----------------------------------------------------------------------------*/
 void physApplyForceToObj(SpaceObj *obj,real32 force,uword transdir)
 {
@@ -47,54 +55,68 @@ void physApplyForceToObj(SpaceObj *obj,real32 force,uword transdir)
 
     dbgAssert((obj->flags & SOF_Rotatable) != 0);
 
+    // 检查对象是否是舰船类型
     if (obj->objtype == OBJ_ShipType)
     {
+        // 检查舰船是否被禁止移动（如正在建造、停靠等）
         if(((Ship *)obj)->dontapplyforceever)
         {
-            //we don't want to try and fly anywheres with this ship obviously!
+            // 该舰船不能移动，直接返回
             return;
         }
 
+        // 检查舰船是否处于"疯狂"状态（特殊效果或异常状态）
         if (obj->flags & SOF_Crazy)
         {
-            return;     // ship is crazy, so return
+            return;     // 舰船处于疯狂状态，不施加力
         }
-#if 0       // new behaviour for fuel, max velocity of ship is lowered instead
+#if 0       // 旧版燃料系统：新版本改为降低最大速度
         if (((ShipStaticInfo *)((Ship *)obj)->staticinfo)->maxfuel != 0.0f)
         {
-            // ship burns fuel
+            // 该舰船消耗燃料
             if ( ((Ship *)obj)->fuel <= 0.0f)
             {
-                return;     // out of fuel, so return
+                return;     // 燃料耗尽，无法施加推力
             }
         }
 #endif
     }
 
+    // 根据方向参数，从对象的旋转矩阵中提取对应的方向向量
+    // 这确保力的方向是相对于对象本地坐标系的
     switch (transdir)
     {
         case TRANS_UP:
         case TRANS_DOWN:
+            // 从旋转矩阵第1列提取Y轴方向（上下）
             matGetVectFromMatrixCol1(vectorforce,((SpaceObjRot *)obj)->rotinfo.coordsys);
             break;
 
         case TRANS_RIGHT:
         case TRANS_LEFT:
+            // 从旋转矩阵第2列提取X轴方向（左右）
             matGetVectFromMatrixCol2(vectorforce,((SpaceObjRot *)obj)->rotinfo.coordsys);
             break;
 
         case TRANS_FORWARD:
         case TRANS_BACKWARD:
+            // 从旋转矩阵第3列提取Z轴方向（前后）
             matGetVectFromMatrixCol3(vectorforce,((SpaceObjRot *)obj)->rotinfo.coordsys);
             break;
     }
 
+    // 检查方向参数的最低位：如果为1，表示反方向
+    // 例如：TRANS_UP=0（正向），TRANS_DOWN=1（反向）
     if (transdir & 1)
     {
-        force = -force;
+        force = -force;  // 反转力的大小
     }
 
+    // 将力的大小乘以方向向量，得到最终的力向量
     vecMultiplyByScalar(vectorforce,force);
+
+    // 将计算出的力累加到对象的总作用力向量中
+    // 注意：这里只是累加，实际的加速度计算在物理更新时进行
     vecAddTo(obj->posinfo.force,vectorforce);
 }
 
