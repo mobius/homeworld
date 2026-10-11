@@ -1,0 +1,15 @@
+# GardensOfKadesh wasm 游戏包(~71MB,用 web/engine/download.sh 重新下载)
+web/engine/homeworld.data
+web/engine/homeworld.wasm
+web/engine/homeworld.js
+web/engine/homeworld.worker.js
+web/engine/coi-serviceworker.min.js
+web/engine/favicon.png
+web/engine/index.html
+
+# three.js 本地库(可从 CDN 重新获取)
+web/js/three.min.js
+
+# 本地工具产物
+*.log
+.claude/
