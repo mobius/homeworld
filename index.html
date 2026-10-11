@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Homeworld 网页模拟 · 技术讲解版</title>
+<!-- Pages 等无 COOP/COEP 头的静态托管:由 SW 补头,使 wasm 游戏(需 SharedArrayBuffer)可用;本地 serve.py 已带头时自动跳过 -->
+<script src="coi-serviceworker.min.js"></script>
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(10, 16, 28, 0.88);
+    --border: #1e3a5f;
+    --kushan: #4da6ff;
+    --taiidan: #ff5544;
+    --text: #c8d6e8;
+    --muted: #6b7f99;
+    --accent: #ffcc66;
+    --code-bg: #0a0f1a;
+    --rail-w: 176px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--text); }
+
+  /* ── 左侧导航栏 ── */
+  #rail { position: absolute; top: 0; left: 0; bottom: 0; width: var(--rail-w);
+    background: linear-gradient(to right, rgba(8,12,22,.97), rgba(8,12,22,.92));
+    border-right: 1px solid var(--border); z-index: 40; display: flex; flex-direction: column;
+    padding: 14px 10px; gap: 6px; }
+  #rail .brand { font-weight: 700; letter-spacing: 2px; color: var(--kushan); font-size: 15px;
+    padding: 4px 6px 10px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  #rail .brand small { display: block; letter-spacing: 0; font-weight: 400;
+    color: var(--muted); font-size: 10px; margin-top: 4px; }
+  #rail .sec { font-size: 10px; color: var(--muted); letter-spacing: 1px;
+    text-transform: uppercase; padding: 8px 6px 2px; }
+  .nav { background: rgba(30,58,95,.3); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 10px; font-size: 12.5px; cursor: pointer; border-radius: 4px;
+    font-family: inherit; text-align: left; transition: background .15s; }
+  .nav:hover { background: rgba(77,166,255,.22); }
+  .nav.active { background: rgba(77,166,255,.4); border-color: var(--kushan); }
+  .nav small { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+  #rail .foot { margin-top: auto; font-size: 10px; color: var(--muted); padding: 6px; line-height: 1.6; }
+  #rail .foot a { color: var(--accent); text-decoration: none; }
+
+  /* ── 视图容器 ── */
+  .view { position: absolute; top: 0; left: var(--rail-w); right: 0; bottom: 0; display: none; }
+  .view.on { display: block; }
+  #game-frame { width: 100%; height: 100%; border: 0; background: #000; }
+  #game-fallback { position: absolute; top: 10px; right: 10px; z-index: 10; }
+  #sandbox-view { overflow: hidden; }
+  #scene { position: absolute; inset: 0; }
+  canvas { display: block; }
+
+  /* ── 沙盒 HUD ── */
+  #hud { position: absolute; inset: 0; pointer-events: none; z-index: 15; }
+  #hud > * { pointer-events: auto; }
+  #topbar { position: absolute; top: 0; left: 0; right: 0; height: 40px;
+    display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: linear-gradient(to bottom, rgba(5,8,15,.95), rgba(5,8,15,.7));
+    border-bottom: 1px solid var(--border); pointer-events: none; }
+  #topbar > * { pointer-events: auto; }
+  #topbar .title { font-weight: 600; letter-spacing: 1px; color: var(--kushan);
+    font-size: 13px; margin-right: 6px; }
+  .btn { background: rgba(30,58,95,.35); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 10px; font-size: 12px; cursor: pointer; border-radius: 3px;
+    font-family: inherit; white-space: nowrap; transition: background .15s; }
+  .btn:hover { background: rgba(77,166,255,.25); }
+  .btn.active { background: rgba(77,166,255,.45); border-color: var(--kushan); }
+  #fps { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  #sel-panel { position: absolute; left: 10px; bottom: 10px; width: 300px; max-height: 36vh;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; overflow-y: auto; font-size: 12px; }
+  #sel-panel h3 { font-size: 11px; color: var(--muted); font-weight: 600;
+    letter-spacing: 1px; margin-bottom: 6px; text-transform: uppercase; }
+  .sel-ship { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+  .sel-ship .nm { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel-ship .st { color: var(--accent); font-size: 11px; min-width: 92px; text-align: right; }
+  .hpbar { width: 56px; height: 5px; background: #1a2536; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .hpbar > div { height: 100%; background: #55cc66; }
+  .hpbar.low > div { background: #ff9955; }
+  .hpbar.crit > div { background: #ff4444; }
+
+  #log { position: absolute; right: 10px; bottom: 10px; width: 290px; max-height: 18vh;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px; font-size: 11px; overflow-y: auto; }
+  #log h3 { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: 1px;
+    margin-bottom: 6px; text-transform: uppercase; }
+  #log .ev { padding: 1px 0; color: var(--muted); }
+  #log .ev b { color: var(--text); font-weight: 500; }
+  #log .ev.kill b { color: var(--taiidan); }
+
+  #hint { position: absolute; top: 52px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+    padding: 7px 14px; font-size: 12px; color: var(--text); white-space: nowrap; }
+  #hint .k { display: inline-block; background: #16233a; border: 1px solid var(--border);
+    border-radius: 3px; padding: 0 5px; font-size: 11px; margin: 0 2px; color: var(--accent); }
+  #toast { position: absolute; top: 110px; left: 50%; transform: translateX(-50%);
+    background: rgba(20,32,52,.95); border: 1px solid var(--accent); border-radius: 4px;
+    padding: 8px 20px; font-size: 13px; color: var(--accent);
+    opacity: 0; transition: opacity .3s; pointer-events: none; }
+
+  /* ── 教学抽屉 ── */
+  #teach-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 470px;
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 45;
+    display: none; flex-direction: column; backdrop-filter: blur(4px); }
+  #teach-panel.open { display: flex; }
+  #teach-head { padding: 10px 14px 8px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; }
+  #teach-head .chap-title { font-size: 14px; font-weight: 600; color: var(--kushan); flex: 1; }
+  #teach-chapters { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 14px 0; }
+  #teach-chapters .btn { padding: 2px 8px; font-size: 11px; }
+  #teach-chapters .btn.cur { background: rgba(77,166,255,.5); border-color: var(--kushan); }
+  #teach-body { flex: 1; overflow-y: auto; padding: 12px 14px; font-size: 13px; line-height: 1.75; }
+  #teach-body p { margin: 8px 0; }
+  #teach-body .cite { display: block; font-size: 11px; color: var(--accent);
+    font-family: Consolas, monospace; margin: 2px 0 4px; }
+  #teach-body pre { background: var(--code-bg); border: 1px solid #16233a; border-radius: 4px;
+    padding: 10px; font-size: 11px; line-height: 1.55; overflow-x: auto;
+    font-family: Consolas, "Courier New", monospace; margin: 8px 0; color: #9fc3e8; }
+  #teach-body pre .cm { color: #5a7a9a; }
+  #teach-body pre .kw { color: #ff9955; }
+  #teach-body pre .fn { color: #ffd479; }
+  #teach-body pre .zh { color: #7fce7f; }
+  #teach-body .demo-box { border: 1px solid var(--accent); border-radius: 4px;
+    padding: 10px; margin: 10px 0; background: rgba(255,204,102,.06); }
+  #teach-body .demo-box h4 { font-size: 12px; color: var(--accent); margin-bottom: 6px; }
+  #teach-body .live { font-family: Consolas, monospace; font-size: 11px;
+    background: var(--code-bg); border-radius: 3px; padding: 6px 8px; margin: 6px 0;
+    white-space: pre; color: #9fe8b8; }
+  #teach-body table { border-collapse: collapse; font-size: 12px; margin: 8px 0; width: 100%; }
+  #teach-body td, #teach-body th { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+  #teach-body th { color: var(--muted); font-weight: 600; }
+  #teach-nav { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+  #chap-pos { flex: 1; text-align: center; font-size: 11px; color: var(--muted); align-self: center; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+  <div id="rail">
+    <div class="brand">HOMEWORLD<small>网页模拟 · 技术讲解版</small></div>
+    <div class="sec">运行</div>
+    <button class="nav active" id="nav-game">🎮 真机游戏<wbr><small>GardensOfKadesh wasm 引擎 + demo 资源,即原版引擎编译到 WebAssembly</small></button>
+    <button class="nav" id="nav-sandbox">🔬 原理沙盒<wbr><small>physics/formation/AI 的 JS 移植,可视化内部机制</small></button>
+    <div class="sec">讲解</div>
+    <button class="nav" id="nav-teach">📖 教学手册<wbr><small>8 章:主循环/物理/倾斜/编队/战斗AI/指令网络/渲染/操作</small></button>
+    <div class="foot">
+      引擎:<a href="https://gardens-of-kadesh.gitlab.io" target="_blank">GardensOfKadesh</a> (HomeworldSDL)<br>
+      源码:<a href="https://github.com/mobius/homeworld" target="_blank">mobius/homeworld</a><br>
+      游戏黑屏?点「新窗口」或检查 web/engine/ 是否完整。
+    </div>
+  </div>
+
+  <div class="view on" id="game-view">
+    <iframe id="game-frame" src="engine/index.html" allow="autoplay"></iframe>
+    <button class="btn" id="game-fallback" onclick="window.open('engine/index.html','_blank')">⧉ 新窗口打开</button>
+  </div>
+
+  <div class="view" id="sandbox-view">
+    <div id="scene"></div>
+    <div id="hud">
+      <div id="topbar">
+        <span class="title">原理沙盒</span>
+        <button class="btn" id="btn-pause">⏸ 暂停</button>
+        <button class="btn" id="btn-speed">速度 ×1</button>
+        <button class="btn" id="btn-soi" title="显示/隐藏任务球边界">◉ 移动球</button>
+        <button class="btn" id="btn-delta" title="delta 编队(需先选中舰船)">▲ 编队 Δ</button>
+        <button class="btn" id="btn-x" title="Formation X(需先选中舰船)">✕ 编队 X</button>
+        <button class="btn" id="btn-cam">⌂ 视角复位</button>
+        <span id="fps"></span>
+      </div>
+      <div id="hint">
+        <span class="k">左键</span>点选/拖框 ·
+        <span class="k">右键</span>移动/攻击 ·
+        <span class="k">A</span>攻击最近 ·
+        <span class="k">S</span>停止 ·
+        <span class="k">D</span>/<span class="k">X</span>编队 ·
+        <span class="k">右键拖</span>转视角 ·
+        <span class="k">滚轮</span>缩放 ·
+        <span class="k">Shift+右键拖</span>平移 ·
+        <span class="k">空格</span>暂停
+      </div>
+      <div id="toast"></div>
+      <div id="sel-panel"><h3>选中舰队</h3><div id="sel-list"><div style="color:var(--muted)">未选中任何单位</div></div></div>
+      <div id="log"><h3>战斗日志</h3><div id="log-list"></div></div>
+    </div>
+  </div>
+
+  <div id="teach-panel">
+    <div id="teach-head">
+      <span class="chap-title" id="chap-title"></span>
+      <button class="btn" id="btn-teach-close">✕</button>
+    </div>
+    <div id="teach-chapters"></div>
+    <div id="teach-body"></div>
+    <div id="teach-nav">
+      <button class="btn" id="btn-prev">← 上一章</button>
+      <span id="chap-pos"></span>
+      <button class="btn" id="btn-next">下一章 →</button>
+    </div>
+  </div>
+
+  <script src="js/three.min.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/teach.js"></script>
+  <script>
+    // 视图切换
+    const views = { game: ['nav-game', 'game-view'], sandbox: ['nav-sandbox', 'sandbox-view'] };
+    function switchView(name) {
+      for (const [k, [nav, view]] of Object.entries(views)) {
+        document.getElementById(nav).classList.toggle('active', k === name);
+        document.getElementById(view).classList.toggle('on', k === name);
+      }
+    }
+    document.getElementById('nav-game').onclick = () => switchView('game');
+    document.getElementById('nav-sandbox').onclick = () => switchView('sandbox');
+
+    // 启动顺序:SIM 世界 → three 场景 → 教学 → 主循环(沙盒在后台也持续运行)
+    SIM.init();
+    UI.init();
+    TEACH.init();
+    UI.animate();
+  </script>
+</body>
+</html>
