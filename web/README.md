@@ -1,11 +1,16 @@
 # Homeworld 网页模拟 · 技术讲解版
 
+**在线版**: https://mobius.github.io/homeworld/ (gh-pages 分支自动发布;首次需在仓库
+Settings → Pages → Source 选 `Deploy from a branch` → `gh-pages` / `(root)` 开启一次)
+
 不重新造轮子:**真机游戏直接用现成的 WebAssembly 引擎**(HomeworldSDL 的官方后续
 GardensOfKadesh,把 Relic 2003 年开源的原版 C 源码编译到浏览器),在其外围做技术讲解。
 
 ## 运行
 
-必须走 HTTP 且带 COOP/COEP 头(引擎需要 SharedArrayBuffer;`file://` 和无头 python http.server 都不行):
+在线版开箱即用(门户页顶层挂了 coi-serviceworker,由 ServiceWorker 补 COOP/COEP 头)。
+本地开发必须走 HTTP 且带 COOP/COEP 头(引擎需要 SharedArrayBuffer;`file://` 和无头
+python http.server 都不行):
 
 ```bash
 cd D:/Github/homeworld
@@ -46,6 +51,23 @@ web/
     └── teach.js        教学章节与演示
 serve.py                 本地服务:带 COOP/COEP 头(wasm 游戏必需)
 .gitignore               排除 67MB 资源包
+```
+
+## 发布(gh-pages)
+
+`gh-pages` 分支 = `web/` 内容平铺到分支根(engine 资源包包含在内),推送后由
+GitHub Pages 服务于 `https://mobius.github.io/homeworld/`。更新站点:
+
+```bash
+# 用 web 当前内容刷新 gh-pages(在仓库根执行)
+rm -rf ../hw-pages-publish && git clone -q . ../hw-pages-publish
+git -C ../hw-pages-publish checkout -q --orphan gh-pages
+git -C ../hw-pages-publish rm -rfq .
+cp -r web/* ../hw-pages-publish/
+git -C ../hw-pages-publish add -A
+git -C ../hw-pages-publish commit -qm "pages: 更新站点"
+git -C ../hw-pages-publish push -q https://github.com/mobius/homeworld.git gh-pages
+rm -rf ../hw-pages-publish
 ```
 
 ## 资源替换
